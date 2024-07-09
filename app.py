@@ -4,7 +4,7 @@ from elasticsearch.exceptions import NotFoundError, RequestError, ConnectionErro
 
 
 app = FastAPI()
-es = Elasticsearch(hosts=["https://c9778aaeafc64b90a4d6ac93c7a07a46.eu-west-1.aws.found.io:443"])
+es = Elasticsearch(hosts=["https://c9778aaeafc64b90a4d6ac93c7a07a46.eu-west-1.aws.found.io:443"], api_key="bG5NSGw1QUI4RmI3c1BVbWoyaUk6MHB2c2MycW9TTzZiOE9haUhIRk56dw==")
 index_name = "locations"
 
 @app.get("/suggest/")
