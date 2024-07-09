@@ -24,41 +24,21 @@ async def suggest(query: str = Query(..., min_length=3)):
 
     try:
         
-        """
-        query = {
-            "suggest": {
-                "suggestions": {
-                    "prefix": query,
-                    "completion": {
-                        "field": "suggest",
-                        "size": 10 
+        q = {
+            "query": {
+                "match_phrase_prefix": {
+                    "suggest": {
+                        "query": query,
+                        "max_expansions": 50
                     }
                 }
-            }
-        }
-
-        response = es.search(index=index_name, body=query)
-
-        suggestions = []
-        if "suggest" in response:
-            options = response["suggest"]["suggestions"][0]["options"]
-            suggestions = [opt["_source"]["label"] for opt in options]
-        """
-
-        query = {
-            "query": {
-                "multi_match": {
-                    "query": query,
-                    "type": "bool_prefix",    
-                    "fields": ["suggest"]
-                }
             },
-            "size": 20,
+            "size": 20, 
             "sort": [{"sorting":{"order":"asc"}}, {"area": {"order":"desc"}}],
-            "_source": ["id", "label","level","parents"]
+            "_source": ["id", "label", "level", "parents"] 
         }
 
-        response = es.search(index=index_name, body=query)
+        response = es.search(index=index_name, body=q)
 
         suggestions = []
         for r in response['hits']['hits']:
@@ -88,6 +68,44 @@ async def suggest(query: str = Query(..., min_length=3)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+
+@app.get("/geocoding")
+async def geocoding(latitude: float = Query(..., description="Latitude of the point"),
+                    longitude: float = Query(..., description="Longitude of the point")):
+    try:
+        q = {
+            "_source": ['id', 'label', 'level', 'parents'],
+            "sort": [
+                {"level": {"order": "desc"}}
+            ],
+            "query": {
+                "bool": {
+                    "filter": {
+                        "geo_shape": {
+                            "geometry": {
+                                "shape": {
+                                "type": "point",
+                                "coordinates": [longitude, latitude]
+                                },
+                            "relation": "intersects"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        response = es.search(index=index_name, body=q)
+
+        results = [r['_source'] for r in response['hits']['hits']]
+        
+        return {"results": results}
+
+    except ElasticsearchException as e:
+        raise HTTPException(status_code=500, detail=f"Elasticsearch error: {str(e)}")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == '__main__':
