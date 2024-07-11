@@ -117,59 +117,15 @@ async def geocoding(latitude: float = Query(..., description="Latitude of the po
 
 
 
-@app.get("/page/")
-async def page(query: str = Query(...)):
-
-    try:
-        query = {
-            "query": {
-                "term": {
-                    "page": query
-                }
-            },
-            "sort": [
-                {"sorting": {"order": "asc"}} 
-            ],
-            "size": 1,
-            "_source": ["id", "level", "label"]
-        }
-
-        response = es.search(index=index_name, body=query)
-
-        pages = []
-        for r in response['hits']['hits']:
-            res = {
-                'id': r['_source']['id'],
-                'label': r['_source']['label'],
-                'level': r['_source']['level']
-            }
-            pages.append(res)
-
-        return {"pages": pages}
-
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail="Resource not found")
-
-    except RequestError as e:
-        raise HTTPException(status_code=400, detail="Bad request")
-
-    except ConnectionError as e:
-        raise HTTPException(status_code=503, detail="Elasticsearch connection error")
-
-    except TransportError as e:
-        raise HTTPException(status_code=503, detail="Elasticsearch transport error")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal server error")
-
-
-
 
 @app.get("/houses/")
 #async def houses(level: str = Query(..., description="The level of the location hierarchy [region, province, city, district, neighborhood]"),
 #                 idx: str = Query(..., description="The id of the location")):
 
 async def houses(page: str = Query(...)):
+
+    index_name = 'houses'
+
     try:
 
         query = {
@@ -204,7 +160,6 @@ async def houses(page: str = Query(...)):
         raise HTTPException(status_code=503, detail="Elasticsearch transport error")
 
     except Exception as e:
-        print(e)
         raise HTTPException(status_code=500, detail="Internal server error")
     
     try:
