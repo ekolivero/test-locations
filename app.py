@@ -125,6 +125,7 @@ async def houses(level: str = Query(..., description="The level of the location 
         hierarchy_path = f"location.location.hierarchy.{level}.id"
 
         query = {
+            "size": 1000,
             "query": {
                 "bool": {
                     "must": [
