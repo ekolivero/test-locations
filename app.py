@@ -17,11 +17,13 @@ app.add_middleware(
 #es = Elasticsearch(hosts=["http://localhost:9200"])
 es = Elasticsearch(hosts=[os.getenv('ELASTIC_HOST')], api_key=os.getenv('ELASTIC_API_KEY'))
 print('Elastic ping:', es.ping())
-index_name = "locations"
+
 
 @app.get("/suggest/")
 async def suggest(query: str = Query(..., min_length=3)):
-
+    
+    index_name = "locations"
+    
     try:
         
         q = {
@@ -72,6 +74,9 @@ async def suggest(query: str = Query(..., min_length=3)):
 @app.get("/geocoding")
 async def geocoding(latitude: float = Query(..., description="Latitude of the point"),
                     longitude: float = Query(..., description="Longitude of the point")):
+    
+    index_name = "locations"
+
     try:
         q = {
             "_source": ['id', 'label', 'level', 'parents'],
@@ -106,6 +111,48 @@ async def geocoding(latitude: float = Query(..., description="Latitude of the po
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/houses/")
+async def houses(level: str = Query(..., description="The level of the location hierarchy [region, province, city, district, neighborhood]"),
+                 idx: str = Query(..., description="The id of the location")):
+
+    index_name = 'houses'
+    
+    try:
+        
+        hierarchy_path = f"location.location.hierarchy.{level}.id"
+
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                        { "term": { hierarchy_path: idx }}
+                    ]
+                }
+            }
+        }
+
+        response = es.search(index=index_name, body=query)
+
+        return {"houses": [r['_source'] for r in response['hits']['hits']]}
+
+    except NotFoundError as e:
+        raise HTTPException(status_code=404, detail="Resource not found")
+
+    except RequestError as e:
+        raise HTTPException(status_code=400, detail="Bad request")
+
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail="Elasticsearch connection error")
+
+    except TransportError as e:
+        raise HTTPException(status_code=503, detail="Elasticsearch transport error")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 
 if __name__ == '__main__':
