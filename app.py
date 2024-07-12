@@ -119,16 +119,16 @@ async def geocoding(latitude: float = Query(..., description="Latitude of the po
 
 
 @app.get("/houses/")
-#async def houses(level: str = Query(..., description="The level of the location hierarchy [region, province, city, district, neighborhood]"),
-#                 idx: str = Query(..., description="The id of the location")):
-
-async def houses(page: str = Query(...)):
-
+async def houses(
+    page: str = Query(...),
+    prezzoMinimo: float = Query(None, description="Minimum price"),
+    prezzoMassimo: float = Query(None, description="Maximum price")
+):
     index_name = 'houses'
 
     try:
-
-        query = {
+        # Query to get location details
+        location_query = {
             "query": {
                 "term": {
                     "page": page
@@ -141,59 +141,51 @@ async def houses(page: str = Query(...)):
             "_source": ["id", "level", "label"]
         }
 
-        response = es.search(index='locations', body=query)
+        response = es.search(index='locations', body=location_query)
 
         idx = response['hits']['hits'][0]['_source']['id']
-
         level = level_mapping[response['hits']['hits'][0]['_source']['level']]
 
-    except NotFoundError as e:
-        raise HTTPException(status_code=404, detail="Resource not found")
-
-    except RequestError as e:
-        raise HTTPException(status_code=400, detail="Bad request")
-
-    except ConnectionError as e:
-        raise HTTPException(status_code=503, detail="Elasticsearch connection error")
-
-    except TransportError as e:
-        raise HTTPException(status_code=503, detail="Elasticsearch transport error")
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Internal server error")
-    
-    try:
-        
+        # Construct houses query
         hierarchy_path = f"location.location.hierarchy.{level}.id"
-
-        query = {
+        houses_query = {
             "size": 1000,
             "query": {
                 "bool": {
                     "must": [
-                        { "term": { hierarchy_path: idx }}
+                        {"term": {hierarchy_path: idx}}
                     ]
                 }
             }
         }
 
-        response = es.search(index=index_name, body=query)
+        # Add price range filter if provided
+        price_range = {}
+        if prezzoMinimo is not None:
+            price_range["gte"] = prezzoMinimo
+        if prezzoMassimo is not None:
+            price_range["lte"] = prezzoMassimo
+
+        if price_range:
+            houses_query["query"]["bool"]["must"].append({
+                "range": {
+                    "price.value": price_range
+                }
+            })
+
+        response = es.search(index=index_name, body=houses_query)
 
         return {"houses": [r['_source'] for r in response['hits']['hits']]}
 
-    except NotFoundError as e:
+    except NotFoundError:
         raise HTTPException(status_code=404, detail="Resource not found")
-
-    except RequestError as e:
+    except RequestError:
         raise HTTPException(status_code=400, detail="Bad request")
-
-    except ConnectionError as e:
+    except ConnectionError:
         raise HTTPException(status_code=503, detail="Elasticsearch connection error")
-
-    except TransportError as e:
+    except TransportError:
         raise HTTPException(status_code=503, detail="Elasticsearch transport error")
-
-    except Exception as e:
+    except Exception:
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
