@@ -1,8 +1,16 @@
 from fastapi import FastAPI, Query, HTTPException
-from elasticsearch import Elasticsearch
+from elasticsearch import BadRequestError, Elasticsearch
 from elasticsearch.exceptions import NotFoundError, RequestError, ConnectionError, TransportError
 import os
 from fastapi.middleware.cors import CORSMiddleware
+from math import ceil
+
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.ERROR)
+logger = logging.getLogger(__name__)
+
 
 app = FastAPI()
 
@@ -120,7 +128,9 @@ async def geocoding(latitude: float = Query(..., description="Latitude of the po
 
 @app.get("/houses/")
 async def houses(
-    page: str = Query(...),
+    location: str = Query(..., description="Location identifier"),
+    page: int = Query(1, ge=1, description="Page number"),
+    per_page: int = Query(10, ge=1, le=100, description="Items per page"),
     prezzoMinimo: float = Query(None, description="Minimum price"),
     prezzoMassimo: float = Query(None, description="Maximum price")
 ):
@@ -131,7 +141,7 @@ async def houses(
         location_query = {
             "query": {
                 "term": {
-                    "page": page
+                    "page": location
                 }
             },
             "sort": [
@@ -143,20 +153,24 @@ async def houses(
 
         response = es.search(index='locations', body=location_query)
 
+        if not response['hits']['hits']:
+            raise HTTPException(status_code=404, detail="Location not found")
+
         idx = response['hits']['hits'][0]['_source']['id']
         level = level_mapping[response['hits']['hits'][0]['_source']['level']]
 
         # Construct houses query
         hierarchy_path = f"location.location.hierarchy.{level}.id"
         houses_query = {
-            "size": 1000,
             "query": {
                 "bool": {
                     "must": [
                         {"term": {hierarchy_path: idx}}
                     ]
                 }
-            }
+            },
+            "from": (page - 1) * per_page,
+            "size": per_page,
         }
 
         # Add price range filter if provided
@@ -173,21 +187,41 @@ async def houses(
                 }
             })
 
+        # Execute the search
         response = es.search(index=index_name, body=houses_query)
 
-        return {"houses": [r['_source'] for r in response['hits']['hits']]}
+        # Get total number of results
+        total_results = response['hits']['total']['value']
+        total_pages = ceil(total_results / per_page)
+
+        return {
+            "houses": [r['_source'] for r in response['hits']['hits']],
+            "location": location,
+            "page": page,
+            "per_page": per_page,
+            "total_results": total_results,
+            "total_pages": total_pages
+        }
 
     except NotFoundError:
+        logger.error("Resource not found", exc_info=True)
         raise HTTPException(status_code=404, detail="Resource not found")
-    except RequestError:
-        raise HTTPException(status_code=400, detail="Bad request")
+    except (RequestError, BadRequestError) as e:
+        logger.error(f"Bad request: {str(e)}", exc_info=True)
+        if "indices.id_field_data.enabled" in str(e):
+            detail = "Fielddata access on _id field is disallowed. Please contact the administrator to enable it or use a different sorting field."
+        else:
+            detail = "Bad request"
+        raise HTTPException(status_code=400, detail=detail)
     except ConnectionError:
+        logger.error("Elasticsearch connection error", exc_info=True)
         raise HTTPException(status_code=503, detail="Elasticsearch connection error")
     except TransportError:
+        logger.error("Elasticsearch transport error", exc_info=True)
         raise HTTPException(status_code=503, detail="Elasticsearch transport error")
-    except Exception:
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 if __name__ == '__main__':
     import uvicorn
