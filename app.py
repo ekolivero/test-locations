@@ -4,6 +4,13 @@ from elasticsearch.exceptions import NotFoundError, RequestError, ConnectionErro
 import os
 from fastapi.middleware.cors import CORSMiddleware
 from math import ceil
+import json
+import geopandas as gpd
+import boto3 
+from shapely.geometry import Point
+import pandas as pd
+from typing import List, Union
+import numpy as np
 
 import logging
 
@@ -23,10 +30,75 @@ app.add_middleware(
 )
 
 #es = Elasticsearch(hosts=["http://localhost:9200"])
-es = Elasticsearch(hosts=[os.getenv('ELASTIC_HOST')], api_key=os.getenv('ELASTIC_API_KEY'))
-print('Elastic ping:', es.ping())
+try:
+    es = Elasticsearch(hosts=[os.getenv('ELASTIC_HOST')], api_key=os.getenv('ELASTIC_API_KEY'))
+    print('Elastic ping:', es.ping())
+except Exception as e:
+        raise Exception(f"Error connecting to elastic: {e}")
+
+# Reading location.geojson file into a GeoPandas df for geocode endpoint
+try:
+    client = boto3.client('s3', aws_access_key_id=os.getenv('AWS_ACCESS_KEY_ID'), aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'), region_name='eu-central-1')
+    response = client.get_object(Bucket='maisome-geocode', Key='location.geojson')
+    content = response['Body'].read().decode('utf-8')
+    json_content = json.loads(content)
+    gdf = gpd.GeoDataFrame.from_features(json_content["features"])
+except Exception as e:
+        raise Exception(f"Error retrieving the location.geojson file and converting into a GeoPandas df: {e}")
+
+
 
 level_mapping = {0:'region', 1:'province', 2:'city', 3:'district', 4:'neighborhood'}
+
+
+
+@app.post("/geocode/")
+async def geocoding(
+    latitudes: List[Union[float, int]] = Query(..., description="List of latitudes"),
+    longitudes: List[Union[float, int]] = Query(..., description="List of longitudes")
+):
+
+    if len(latitudes) != len(longitudes):
+        raise HTTPException(status_code=400, detail="Latitudes and longitudes must have the same length")
+    
+    locations = []
+    
+    for i in range(0, len(latitudes), batch_size):
+        
+        lat = latitudes[i:i + batch_size]
+    
+        lon = longitudes[i:i + batch_size]
+
+        geometry = [Point(xy) for xy in zip(lon, lat)]
+
+        idx = list(range(0, len(lat)))
+
+        data = {'lat':lat, 'lon':lon, 'idx':idx, 'geometry':geometry}
+        
+        df = gpd.GeoDataFrame(data, geometry='geometry', crs="EPSG:4326")
+        
+        df = gpd.sjoin(df, gdf[['id','label','level','parents','geometry']], how='left', predicate='intersects').drop('index_right', axis=1)
+
+        # Coordinates have more than one geometry, keep only the lowest level
+        df = df.sort_values(by='level', ascending=False) 
+        df.drop_duplicates(subset='idx', keep='first', inplace=True)
+        df = df.sort_values(by='idx', ascending=True)
+    
+        df = df[['id','label','level','parents']]
+
+        df.fillna('', axis=1, inplace=True)
+
+        df = df.to_dict(orient='records')
+
+        # convert 'parents' field into json format (if present)
+        for location in df:
+            if location['parents'] == '':
+                continue
+            location['parents'] = json.loads(location['parents'])
+
+        locations.extend(df)
+
+    return {"results": locations}
 
 
 @app.get("/suggest/")
