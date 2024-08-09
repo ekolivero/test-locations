@@ -1,15 +1,18 @@
-version: 1.0 # version of the specification
-runtime: python311
+version: 1.0
+runtime: python3
 build:
   commands:
+    pre-build:
+      - python --version
+      - pip install --upgrade pip
     build:
-      - pip3 install -r requirements.txt # install dependencies
-
-  env: # define environment variables
-    - name: PORT
-      value: '8080'
-
+      - pip install -r requirements.txt
+    post-build:
+      - pip list
 run:
-  command: python3 app.py # command to run fastapi
+  command: uvicorn app:app --host 0.0.0.0 --port 8000
   network:
-    port: 8000 # port AppRunner will expose
+    port: 8000
+  env:
+    - name: PYTHONUNBUFFERED
+      value: '1'
