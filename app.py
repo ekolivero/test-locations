@@ -50,7 +50,7 @@ except Exception as e:
 
 level_mapping = {0:'region', 1:'province', 2:'city', 3:'district', 4:'neighborhood'}
 
-
+batch_size = 1000
 
 @app.post("/geocode/")
 async def geocoding(
@@ -297,4 +297,4 @@ async def houses(
 
 if __name__ == '__main__':
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
